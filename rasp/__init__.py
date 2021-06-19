@@ -1,6 +1,6 @@
 import rasp.core
 import rasp.manual
-import rasp.transformer
+import rasp.model
 
 
 # download the latest utilities - github.com/yashbonde

@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from rasp.transformer.model import *
+from rasp.model import *
 from rasp.manual import tokens
 
 def set_seed(seed):

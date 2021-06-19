@@ -127,4 +127,27 @@ def flip(x):
   i = indices(x); l = length(x)
   return select(i, l-i-1, "==")
 
+# --- selector_width
 
+# def selector_width(x):
+#   pass
+
+# def selector_width (sel ,assume_bos = False):
+#   light0 = indicator ( indices == 0)
+#   or0 = sel or select_eq ( indices ,0)
+#   and0 =sel and select_eq ( indices ,0)
+#   or0_0_frac =aggregate (or0 , light0 )
+#   or0_width = 1 / or0_0_frac
+#   and0_width = aggregate (and0 ,light0 ,0)
+# 
+#   # if has bos , remove bos from width
+#   # (doesn ’t count , even if chosen by
+#   # sel) and return .
+#   bos_res = or0_width - 1
+# 
+#   # else , remove 0 - position from or0 ,
+#   # and re -add according to and0 :
+#   nobos_res = bos_res + and0_width
+# 
+#   return bos_res if assume_bos else
+#   nobos_res

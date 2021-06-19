@@ -11,6 +11,18 @@ from torch.nn import functional as F
 from rasp.manual import vocab, tokens
 
 
+class Config:
+  vocab_size = len(vocab)
+  n_embd = 18
+  block_size = 32
+  dropout = 0.0
+  n_layer = 1
+  n_head = 1
+  def __init__(self, **kwargs):
+    for k,v in kwargs.items():
+      setattr(self, k, v)
+
+
 class TinyConfig:
   vocab_size = len(vocab)
   n_embd = 18
@@ -200,3 +212,9 @@ class FullTransformer(nn.Module):
       loss = ce_loss + mse_loss
 
     return logits, loss
+
+
+def get_model(**kwargs):
+  config = Config(**kwargs)
+  return FullTransformer(config)
+
