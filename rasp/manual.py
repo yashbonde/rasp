@@ -36,9 +36,11 @@ def tokens(x):
     return "".join([ivocab[t] for t in x.tolist()])
 
 def indices(x):
+  # indices("hello") = [0,1,2,3,4]
   return torch.arange(len(x)).float()
 
 def length(x):
+  # length("hello") = [5,5,5,5,5]
   return torch.ones(len(x)) * len(x)
 
 

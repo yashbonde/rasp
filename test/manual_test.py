@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from rasp import *
+from rasp.manual import *
 
 F = False
 T = True
