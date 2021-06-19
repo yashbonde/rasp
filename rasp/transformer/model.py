@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from einops import rearrange
-
 from rasp.manual import vocab, tokens
 
 
@@ -22,6 +20,41 @@ class TinyConfig:
   n_head = 1
   
 
+class SelfAttention(nn.Module):
+  def __init__(self, config):
+    super().__init__()
+    assert config.n_embd % config.n_head == 0
+    # key, query, value projections for all heads
+    self.key = nn.Linear(config.n_embd, config.n_embd)
+    self.query = nn.Linear(config.n_embd, config.n_embd)
+    self.value = nn.Linear(config.n_embd, config.n_embd)
+    # output projection
+    self.proj = nn.Linear(config.n_embd, config.n_embd)
+    # causal mask to ensure that attention is only applied to the left in the input sequence
+    self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
+                                  .view(1, 1, config.block_size, config.block_size))
+    self.n_head = config.n_head
+
+  def forward(self, x, attn_mask = None, layer_past=None):
+    B, T, C = x.size()
+
+    # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+    k = self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+    q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+    v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+    # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+    att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+    if attn_mask is not None:
+      att = att + attn_mask
+    att = F.softmax(att, dim=-1)
+    y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+    y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+    # output projection
+    y = self.proj(y)
+    return y, att
+
 class Block(nn.Module):
   """ an unassuming Transformer block """
 
@@ -30,11 +63,7 @@ class Block(nn.Module):
     self.ln1 = nn.LayerNorm(config.n_embd)
     self.ln2 = nn.LayerNorm(config.n_embd)
     self.split_size = config.n_embd
-    self.attn = nn.MultiheadAttention(
-      embed_dim = config.n_embd,
-      num_heads = config.n_head,
-      dropout=config.dropout,
-    )
+    self.attn = SelfAttention(config)
     self.mlp = nn.Sequential(
       nn.Linear(config.n_embd, 4 * config.n_embd),
       nn.GELU(),
@@ -42,15 +71,14 @@ class Block(nn.Module):
       nn.Dropout(config.dropout),
     )
 
+    self.n_head = config.n_head
+
   def forward(self, x):
     y = self.ln1(x)
-    # this rearrange is not needed from torch>=1.9.0
-    y = rearrange(y, "n l e -> l n e")
-    y = self.attn(y, y, y)[0]
-    y = rearrange(y, "l n e -> n l e")
+    y, att = self.attn(y)
     x = x + y
     x = x + self.mlp(self.ln2(x))
-    return x
+    return x, att
 
 class FullTransformer(nn.Module):
   """ the full GPT language model, with a context size of block_size """
@@ -80,29 +108,65 @@ class FullTransformer(nn.Module):
   
   def format_inputs_and_tokens(self, idx, targets):
     d = self.get_device()
+    i_is_str = False
     if isinstance(idx, str):
       idx = tokens(idx).to(d).view(1, -1)
+      i_is_str = True
     elif isinstance(idx, list) and isinstance(idx[0], str):
       idx = torch.cat([tokens(x) for x in idx], dim = 0).to(d)
+      i_is_str = True
     elif isinstance(idx, torch.Tensor) and len(idx.shape) == 1:
       idx = idx.view(1, -1)
     
     idx = idx.long()
 
     if targets is not None:
+      assert isinstance(targets, (list, tuple)), \
+        "target needs to have a LongTensor and a list/tuple of attn for MSE"
+
+      targets, attn_masks = targets
+
+      # targets for cross-entropy
       if isinstance(targets, str):
         targets = tokens(targets).to(d).view(1, -1)
       elif isinstance(targets, list) and isinstance(targets[0], str):
         targets = torch.cat([tokens(x) for x in targets], dim = 0).to(d)
       elif isinstance(targets, torch.Tensor) and len(targets.shape) == 1:
         targets = targets.view(1, -1)
-      
       targets = targets.long()
+
+      # attention masks
+      assert len(attn_masks) == len(self.blocks), "Number of attentions should be same as number of blocks"
+      assert isinstance(attn_masks[0], (list, tuple, torch.Tensor)), "Each sequence in the attention should be a tuple/list/tensor"
+
+      for i,(b,a) in enumerate(zip(self.blocks, attn_masks)):
+        assert isinstance(a[0], torch.Tensor)
+        assert len(a) == b.n_head, f"Number of attn != number of heads in a block. Got: {len(a), b.n_head}"
+        attn_masks[i] = torch.cat([aa.float().unsqueeze(0) for aa in a], 0)
+
+      # for i,a in enumerate(attn_masks):
+      #   print(":--:", i, a.shape, self.blocks[i].n_head)
+
+      # convert to the final tuple
+      targets = (targets, attn_masks)
     
-    return idx, targets
+    return idx, targets, i_is_str
 
   def forward(self, idx, targets=None):
-    idx, targets = self.format_inputs_and_tokens(idx, targets)
+    """
+    Args:
+      idx ([type]): [description]
+      targets ([type], optional): Since in rasp you calculate losses for attention matrix as well,
+        this targets is a list:
+          - torch.LongTensor(): with the cross entropy for entire input tokens, just like a
+            normal transformer (GPT/BERT)
+          - target_attn_masks:  this is the target matrices for all the attentions in the network.
+            ensure that the number of heads and values are common.
+
+    Returns:
+        [type]: [description]
+    """
+    idx, targets, i_is_str = self.format_inputs_and_tokens(idx, targets)
 
     b, t = idx.size()
     assert t <= self.block_size, "Cannot forward, model block size is exhausted."
@@ -111,14 +175,28 @@ class FullTransformer(nn.Module):
     token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
     position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
     x = self.drop(token_embeddings + position_embeddings)
-    x = self.blocks(x)
+    all_attn = []
+    for b in self.blocks:
+      x, att = b(x)
+      all_attn.append(att)
     x = self.ln_f(x)
     logits = self.head(x)
 
     # if we are given some desired targets also calculate the loss
     loss = None
     if targets is not None:
-      loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+      targets, attn_masks = targets
+      
+      # Cross Entropy loss
+      ce_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+      # MSE-loss, for each head, manually
+      mse_loss = 0
+      for a,t in zip(all_attn, attn_masks):
+        t = torch.tile(t, [a.shape[0], 1, 1, 1])
+        # print(a.shape, t.shape) # [b, n_head, s, s]
+
+        mse_loss += F.mse_loss(a, t)
+      loss = ce_loss + mse_loss
 
     return logits, loss
-

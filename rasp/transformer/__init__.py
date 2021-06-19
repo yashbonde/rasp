@@ -1,2 +1,1 @@
-import rasp.transformer.model
-import rasp.transformer.loss
+from rasp.transformer.model import *

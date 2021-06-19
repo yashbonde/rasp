@@ -27,7 +27,7 @@ class TestTransformer(unittest.TestCase):
     logits, loss = model(x)
     self.assertEqual(
       logits.argmax(-1).tolist(),
-      [[127, 94, 85, 111, 7, 32], [5, 92, 29, 99, 21, 51]]
+      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
     )
     self.assertEqual(loss, None)
 
@@ -38,12 +38,11 @@ class TestTransformer(unittest.TestCase):
     model = FullTransformer(config)
     x = torch.randint(0, config.vocab_size, size = (2, 6))
     target = torch.randint(0, config.vocab_size, size = (2, 6))
+    target = (target, [[torch.randn(6, 6)]])
+    
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).tolist(),
-      [[127, 94, 85, 111, 7, 32], [5, 92, 29, 99, 21, 51]]
-    )
-    out = np.isclose(loss.item(), 5.3880)
+    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
+    out = np.isclose(loss.item(), 5.8412)
     self.assertTrue(out)
 
   def test_backward(self):
@@ -55,12 +54,11 @@ class TestTransformer(unittest.TestCase):
 
     x = torch.randint(0, config.vocab_size, size = (2, 6))
     target = torch.randint(0, config.vocab_size, size = (2, 6))
+    target = (target, [[torch.randn(6, 6)]])
+
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).tolist(),
-      [[127, 94, 85, 111, 7, 32], [5, 92, 29, 99, 21, 51]]
-    )
-    out = np.isclose(loss.item(), 5.3880)
+    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
+    out = np.isclose(loss.item(), 5.8412)
     self.assertTrue(out)
 
     optim.zero_grad()
@@ -68,11 +66,8 @@ class TestTransformer(unittest.TestCase):
     optim.step()
 
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).tolist(),
-      [[127, 94, 85, 111, 7, 32], [5, 92, 29, 99, 21, 51]]
-    )
-    out = np.isclose(loss.item(), 5.3373)
+    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
+    out = np.isclose(loss.item(), 5.7863)
     self.assertTrue(out)
 
   # forward + backward testing with strings
@@ -83,7 +78,7 @@ class TestTransformer(unittest.TestCase):
     x = "hey"
     logits, loss = model(x)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
+    self.assertEqual(p, ['fmo'])
     self.assertEqual(loss, None)
 
   def test_forward_with_loss_str(self):
@@ -91,10 +86,14 @@ class TestTransformer(unittest.TestCase):
     config = TinyConfig()
     model = FullTransformer(config)
     x = "hey"; target = "hey"
+    target = (target, [[torch.randn(3, 3)]])
+
     logits, loss = model(x, target)
+    
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.7304)
+    
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.6525)
     self.assertTrue(out)
 
   def test_backward_str(self):
@@ -105,10 +104,12 @@ class TestTransformer(unittest.TestCase):
 
     # first pass
     x = "hey"; target = "hey"
+    target = (target, [[torch.randn(3, 3)]])
+
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.7304)
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.6525)
     self.assertTrue(out)
 
     # backprop
@@ -118,8 +119,9 @@ class TestTransformer(unittest.TestCase):
 
     # second pass
     logits, loss = model(x, target)
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.6594)
+    p = [tokens(x) for x in logits.argmax(-1)]
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.5600)
     self.assertTrue(out)
 
 
@@ -128,7 +130,7 @@ class TestTransformer(unittest.TestCase):
   # NOTE: this assumes that the entire model resides on a single card, ie. there is
   # no model distributed.
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_initialize_cuda(self):
     # test if the model is even initialized correctly
     config = TinyConfig()
@@ -137,7 +139,7 @@ class TestTransformer(unittest.TestCase):
     self.assertEqual(model.num_parameters, 10368)
     del model
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_forward_cuda(self):
     set_seed(4)
     config = TinyConfig()
@@ -151,7 +153,7 @@ class TestTransformer(unittest.TestCase):
     )
     self.assertEqual(loss, None)
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_forward_with_loss_cuda(self):
     set_seed(4)
     config = TinyConfig()
@@ -167,7 +169,7 @@ class TestTransformer(unittest.TestCase):
     out = np.isclose(loss.item(), 5.3880)
     self.assertTrue(out)
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_backward_cuda(self):
     set_seed(4)
     config = TinyConfig()
@@ -192,37 +194,37 @@ class TestTransformer(unittest.TestCase):
     logits, loss = model(x, target)
     self.assertEqual(
       logits.argmax(-1).detach().cpu().tolist(),
-      [[9, 60, 18, 22, 5, 106], [94, 13, 60, 80, 104, 46]]
+      [[127, 94, 85, 111, 7, 32], [5, 92, 29, 99, 21, 51]]
     )
     out = np.isclose(loss.item(), 5.3373)
     self.assertTrue(out)
 
   # forward + backward testing with strings CUDA
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
-  def test_forward_str(self):
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  def test_forward_str_cuda(self):
     set_seed(4)
     config = TinyConfig()
     model = FullTransformer(config).cuda()
     x = "hey"
     logits, loss = model(x)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
+    self.assertEqual(p, ['fmo'])
     self.assertEqual(loss, None)
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
-  def test_forward_with_loss_str(self):
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  def test_forward_with_loss_str_cuda(self):
     set_seed(4)
     config = TinyConfig()
     model = FullTransformer(config).cuda()
     x = "hey"; target = "hey"
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.7304)
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.6525)
     self.assertTrue(out)
 
-  @unittest.skipIf(~torch.cuda.is_available(), "CUDA not found, skipping these tests")
-  def test_backward_str(self):
+  @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
+  def test_backward_str_cuda(self):
     set_seed(4)
     config = TinyConfig()
     model = FullTransformer(config).cuda()
@@ -232,8 +234,8 @@ class TestTransformer(unittest.TestCase):
     x = "hey"; target = "hey"
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.7304)
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.6525)
     self.assertTrue(out)
 
     # backprop
@@ -243,6 +245,9 @@ class TestTransformer(unittest.TestCase):
 
     # second pass
     logits, loss = model(x, target)
-    self.assertEqual(p, ['iqr'])
-    out = np.isclose(loss.item(), 2.6594)
+    self.assertEqual(p, ['fmo'])
+    out = np.isclose(loss.item(), 4.5600)
     self.assertTrue(out)
+
+if __name__ == "__main__":
+  unittest.main()
