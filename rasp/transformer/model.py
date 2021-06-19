@@ -10,9 +10,11 @@ from torch.nn import functional as F
 
 from einops import rearrange
 
+from rasp.manual import vocab, tokens
+
 
 class TinyConfig:
-  vocab_size = 128
+  vocab_size = len(vocab)
   n_embd = 18
   block_size = 32
   dropout = 0.0
@@ -28,11 +30,10 @@ class Block(nn.Module):
     self.ln1 = nn.LayerNorm(config.n_embd)
     self.ln2 = nn.LayerNorm(config.n_embd)
     self.split_size = config.n_embd
-    self.qkv = nn.Linear(config.n_embd, config.n_embd * 3)
     self.attn = nn.MultiheadAttention(
       embed_dim = config.n_embd,
       num_heads = config.n_head,
-      dropout=config.dropout
+      dropout=config.dropout,
     )
     self.mlp = nn.Sequential(
       nn.Linear(config.n_embd, 4 * config.n_embd),
@@ -43,10 +44,11 @@ class Block(nn.Module):
 
   def forward(self, x):
     y = self.ln1(x)
-    qkv = self.qkv(y).split(self.split_size, 2)
-    qkv = list(map(lambda x: rearrange(x, "n l e -> l n e"), qkv))
-    attn_out = self.attn(*qkv)[0]
-    x = x + rearrange(attn_out, "l n e -> n l e")
+    # this rearrange is not needed from torch>=1.9.0
+    y = rearrange(y, "n l e -> l n e")
+    y = self.attn(y, y, y)[0]
+    y = rearrange(y, "l n e -> n l e")
+    x = x + y
     x = x + self.mlp(self.ln2(x))
     return x
 
@@ -67,27 +69,41 @@ class FullTransformer(nn.Module):
     # decoder head
     self.ln_f = nn.LayerNorm(config.n_embd)
     self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-
     self.block_size = config.block_size
-    self.apply(self._init_weights)
-
-  def get_block_size(self):
-    return self.block_size
 
   @property
   def num_parameters(self):
     return sum(p.numel() for p in self.parameters())
 
-  def _init_weights(self, module):
-    if isinstance(module, (nn.Linear, nn.Embedding)):
-      module.weight.data.normal_(mean=0.0, std=0.02)
-      if isinstance(module, nn.Linear) and module.bias is not None:
-        module.bias.data.zero_()
-    elif isinstance(module, nn.LayerNorm):
-      module.bias.data.zero_()
-      module.weight.data.fill_(1.0)
+  def get_device(self):
+    return next(self.parameters()).device
+  
+  def format_inputs_and_tokens(self, idx, targets):
+    d = self.get_device()
+    if isinstance(idx, str):
+      idx = tokens(idx).to(d).view(1, -1)
+    elif isinstance(idx, list) and isinstance(idx[0], str):
+      idx = torch.cat([tokens(x) for x in idx], dim = 0).to(d)
+    elif isinstance(idx, torch.Tensor) and len(idx.shape) == 1:
+      idx = idx.view(1, -1)
+    
+    idx = idx.long()
+
+    if targets is not None:
+      if isinstance(targets, str):
+        targets = tokens(targets).to(d).view(1, -1)
+      elif isinstance(targets, list) and isinstance(targets[0], str):
+        targets = torch.cat([tokens(x) for x in targets], dim = 0).to(d)
+      elif isinstance(targets, torch.Tensor) and len(targets.shape) == 1:
+        targets = targets.view(1, -1)
+      
+      targets = targets.long()
+    
+    return idx, targets
 
   def forward(self, idx, targets=None):
+    idx, targets = self.format_inputs_and_tokens(idx, targets)
+
     b, t = idx.size()
     assert t <= self.block_size, "Cannot forward, model block size is exhausted."
 
