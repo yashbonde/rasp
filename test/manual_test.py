@@ -13,8 +13,25 @@ def set_seed(seed):
 class TestPrimaryOps(unittest.TestCase):
 
   def test_tokens(self):
-    self.assertEqual(tokens("hello").tolist(), [ 7.,  4., 11., 11., 14.])
+    # single string encoding -> decoding
+    self.assertTrue(isinstance(tokens("hello"), torch.Tensor))
+    self.assertEqual(tokens("hello").tolist(), [ 7,  4, 11, 11, 14])
     self.assertEqual(tokens(tokens("hey")), "hey")
+
+    # single string encoding -> decoding (bos tag)
+    self.assertEqual(tokens("hey", True).tolist(), [26,  7,  4, 24])
+    self.assertEqual(tokens(tokens("hey", True)), "hey")
+    self.assertEqual(tokens(tokens("hey", True), True), "$hey")
+
+    # list of strings
+    self.assertTrue(isinstance(tokens(["hello", "hello"]), torch.Tensor))
+    self.assertEqual(tokens(["hello", "hello"]).tolist(), [[ 7,  4, 11, 11, 14], [ 7,  4, 11, 11, 14]])
+    self.assertEqual(tokens(tokens(["hey", "hey"])), ["hey", "hey"])
+
+    # list of strings (bos tag)
+    self.assertEqual(tokens(["hello", "hello"], True).tolist(), [[26, 7,  4, 11, 11, 14], [26, 7,  4, 11, 11, 14]])
+    self.assertEqual(tokens(tokens(["hey", "hey"], True)), ["hey", "hey"])
+    self.assertEqual(tokens(tokens(["hey", "hey"], True), True), ["$hey", "$hey"])
 
   def test_logical_1d(self):
     x = torch.Tensor([F, F, T])
@@ -65,6 +82,7 @@ class TestPrimaryOps(unittest.TestCase):
 
   def test_flip(self):
     self.assertEqual(flip("hey").tolist(), [[F, F, T], [F, T, F], [T, F, F]])
+
 
 class PaperBuiltOps(unittest.TestCase):
   

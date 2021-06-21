@@ -36,24 +36,23 @@ class SelfAttention(nn.Module):
   def __init__(self, config):
     super().__init__()
     assert config.n_embd % config.n_head == 0
-    # key, query, value projections for all heads
-    self.key = nn.Linear(config.n_embd, config.n_embd)
-    self.query = nn.Linear(config.n_embd, config.n_embd)
-    self.value = nn.Linear(config.n_embd, config.n_embd)
+    # single qkv like GPT
+    self.qkv = nn.Linear(config.n_embd, config.n_embd * 3)
+    self.split_size = config.n_embd
+    
     # output projection
     self.proj = nn.Linear(config.n_embd, config.n_embd)
+    
     # causal mask to ensure that attention is only applied to the left in the input sequence
     self.register_buffer("mask", torch.tril(torch.ones(config.block_size, config.block_size))
                                   .view(1, 1, config.block_size, config.block_size))
     self.n_head = config.n_head
 
-  def forward(self, x, attn_mask = None, layer_past=None):
+  def forward(self, x, attn_mask = None):
     B, T, C = x.size()
 
     # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-    k = self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-    q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-    v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+    q,k,v = self.qkv(x).split(self.split_size, 2)
 
     # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
     att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -86,14 +85,16 @@ class Block(nn.Module):
     self.n_head = config.n_head
 
   def forward(self, x):
+    x, attn_mask = x
     y = self.ln1(x)
-    y, att = self.attn(y)
+    y, att = self.attn(y, attn_mask)
     x = x + y
     x = x + self.mlp(self.ln2(x))
-    return x, att
+    return [x, att]
 
 class FullTransformer(nn.Module):
-  """ the full GPT language model, with a context size of block_size """
+  """A full transformer model with focus on data and I/O.
+  Can consume strings, lists, arrays and torch-tensors."""
 
   def __init__(self, config):
     super().__init__()
@@ -120,17 +121,20 @@ class FullTransformer(nn.Module):
   
   def format_inputs_and_tokens(self, idx, targets):
     d = self.get_device()
-    i_is_str = False
-    if isinstance(idx, str):
-      idx = tokens(idx).to(d).view(1, -1)
-      i_is_str = True
-    elif isinstance(idx, list) and isinstance(idx[0], str):
-      idx = torch.cat([tokens(x) for x in idx], dim = 0).to(d)
-      i_is_str = True
-    elif isinstance(idx, torch.Tensor) and len(idx.shape) == 1:
-      idx = idx.view(1, -1)
-    
-    idx = idx.long()
+
+    # format input
+    key_val_attn_mask = None
+
+    # if isinstance(idx, str):
+    #   idx = tokens(idx).to(d).unsqueeze(0)
+    # elif isinstance(idx, list) and isinstance(idx[0], str):
+    #   idx = torch.cat([tokens(x).unsqueeze(0) for x in idx], dim = 0).to(d)
+    # elif isinstance(idx, torch.Tensor) and len(idx.shape) == 1:
+    #   idx = idx.unsqueeze(0)
+    if not isinstance(idx, torch.Tensor):
+      idx = tokens(idx)
+    if len(idx.shape) == 1:
+      idx = idx.unsqueeze(0)
 
     if targets is not None:
       assert isinstance(targets, (list, tuple)), \
@@ -161,10 +165,10 @@ class FullTransformer(nn.Module):
 
       # convert to the final tuple
       targets = (targets, attn_masks)
-    
-    return idx, targets, i_is_str
 
-  def forward(self, idx, targets=None):
+    return idx, key_val_attn_mask, targets
+
+  def forward(self, idx, targets=None, output_format = None):
     """
     Args:
       idx ([type]): [description]
@@ -178,7 +182,7 @@ class FullTransformer(nn.Module):
     Returns:
         [type]: [description]
     """
-    idx, targets, i_is_str = self.format_inputs_and_tokens(idx, targets)
+    idx, attn_mask, targets = self.format_inputs_and_tokens(idx, targets)
 
     b, t = idx.size()
     assert t <= self.block_size, "Cannot forward, model block size is exhausted."
@@ -189,7 +193,7 @@ class FullTransformer(nn.Module):
     x = self.drop(token_embeddings + position_embeddings)
     all_attn = []
     for b in self.blocks:
-      x, att = b(x)
+      x, att = b([x, attn_mask])
       all_attn.append(att)
     x = self.ln_f(x)
     logits = self.head(x)
@@ -210,6 +214,9 @@ class FullTransformer(nn.Module):
 
         mse_loss += F.mse_loss(a, t)
       loss = ce_loss + mse_loss
+
+    if output_format is not None:
+      raise NotImplementedError('this functionality has not been build, hold on!')
 
     return logits, loss
 

@@ -11,9 +11,10 @@ def set_seed(seed):
 # assertion values
 
 # for numpy and tensor
-FIRST_PASS_TARGET_TENSOR = [[50, 22, 61, 52, 89, 32], [116, 13, 89, 9, 9, 2]]
-FIRST_PASS_LOSS_TENSOR = 5.7651
-SECOND_PASS_LOSS_TENSOR = 5.7112
+FIRST_PASS_TARGET_TENSOR = [[13, 23, 3, 10, 14, 13], [18, 5, 25, 3, 4, 10]]
+FIRST_PASS_LOSS_TENSOR = 4.4479
+SECOND_PASS_TARGET_TENSOR = [[19, 23, 3, 10, 14, 13], [18, 5, 25, 14, 4, 10]]
+SECOND_PASS_LOSS_TENSOR = 4.3977
 
 # for string computation
 STRING_PREDICTION = ['fme']
@@ -27,15 +28,13 @@ class TestTransformer(unittest.TestCase):
   # test if the model is even initialized correctly
   def test_initialize(self):
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config)
-    self.assertEqual(model.num_parameters, 9342)
+    self.assertEqual(model.num_parameters, 5706)
 
   # forward + backward testing with tensors
   def test_forward(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config)
     x = torch.randint(0, config.vocab_size, size = (2, 6))
     logits, loss = model(x)
@@ -45,7 +44,6 @@ class TestTransformer(unittest.TestCase):
   def test_forward_with_loss(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config)
     x = torch.randint(0, config.vocab_size, size = (2, 6))
     target = torch.randint(0, config.vocab_size, size = (2, 6))
@@ -59,7 +57,6 @@ class TestTransformer(unittest.TestCase):
   def test_backward(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config)
     optim = torch.optim.Adam(model.parameters())
 
@@ -77,7 +74,7 @@ class TestTransformer(unittest.TestCase):
     optim.step()
 
     logits, loss = model(x, target)
-    self.assertEqual( logits.argmax(-1).tolist(), FIRST_PASS_TARGET_TENSOR )
+    self.assertEqual( logits.argmax(-1).tolist(), SECOND_PASS_TARGET_TENSOR)
     out = np.isclose(loss.item(), SECOND_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
@@ -135,26 +132,22 @@ class TestTransformer(unittest.TestCase):
     out = np.isclose(loss.item(), SECOND_PASS_LOSS_STRING)
     self.assertTrue(out)
 
-
-  # forward + backward testing with tensors CUDA
-
   # NOTE: this assumes that the entire model resides on a single card, ie. there is
   # no model distributed.
-
+  
+  # forward + backward testing with tensors CUDA
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_initialize_cuda(self):
     # test if the model is even initialized correctly
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config).cuda()
-    self.assertEqual(model.num_parameters, 9342)
+    self.assertEqual(model.num_parameters, 5706)
     del model
 
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
   def test_forward_cuda(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config).cuda()
     x = torch.randint(0, config.vocab_size, size = (2, 6)).cuda()
     logits, loss = model(x)
@@ -165,7 +158,6 @@ class TestTransformer(unittest.TestCase):
   def test_forward_with_loss_cuda(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config).cuda()
     x = torch.randint(0, config.vocab_size, size = (2, 6)).cuda()
     target = torch.randint(0, config.vocab_size, size = (2, 6)).cuda()
@@ -180,7 +172,6 @@ class TestTransformer(unittest.TestCase):
   def test_backward_cuda(self):
     set_seed(4)
     config = TinyConfig()
-    config.vocab_size = 128
     model = FullTransformer(config).cuda()
     optim = torch.optim.Adam(model.parameters())
 
@@ -198,7 +189,7 @@ class TestTransformer(unittest.TestCase):
     optim.step()
 
     logits, loss = model(x, target)
-    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), FIRST_PASS_TARGET_TENSOR )
+    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), SECOND_PASS_TARGET_TENSOR)
     out = np.isclose(loss.item(), SECOND_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
