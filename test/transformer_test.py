@@ -8,6 +8,20 @@ def set_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+# assertion values
+
+# for numpy and tensor
+FIRST_PASS_TARGET_TENSOR = [[50, 22, 61, 52, 89, 32], [116, 13, 89, 9, 9, 2]]
+FIRST_PASS_LOSS_TENSOR = 5.7651
+SECOND_PASS_LOSS_TENSOR = 5.7112
+
+# for string computation
+STRING_PREDICTION = ['fme']
+FIRST_PASS_LOSS_STRING = 4.5970
+SECOND_PASS_LOSS_STRING = 4.5050
+
+# test class
+
 class TestTransformer(unittest.TestCase):
 
   # test if the model is even initialized correctly
@@ -25,10 +39,7 @@ class TestTransformer(unittest.TestCase):
     model = FullTransformer(config)
     x = torch.randint(0, config.vocab_size, size = (2, 6))
     logits, loss = model(x)
-    self.assertEqual(
-      logits.argmax(-1).tolist(),
-      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
-    )
+    self.assertEqual( logits.argmax(-1).tolist(), FIRST_PASS_TARGET_TENSOR )
     self.assertEqual(loss, None)
 
   def test_forward_with_loss(self):
@@ -41,8 +52,8 @@ class TestTransformer(unittest.TestCase):
     target = (target, [[torch.randn(6, 6)]])
     
     logits, loss = model(x, target)
-    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
-    out = np.isclose(loss.item(), 5.8412)
+    self.assertEqual( logits.argmax(-1).tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
   def test_backward(self):
@@ -57,8 +68,8 @@ class TestTransformer(unittest.TestCase):
     target = (target, [[torch.randn(6, 6)]])
 
     logits, loss = model(x, target)
-    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
-    out = np.isclose(loss.item(), 5.8412)
+    self.assertEqual( logits.argmax(-1).tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
     optim.zero_grad()
@@ -66,8 +77,8 @@ class TestTransformer(unittest.TestCase):
     optim.step()
 
     logits, loss = model(x, target)
-    self.assertEqual( logits.argmax(-1).tolist(), [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]] )
-    out = np.isclose(loss.item(), 5.7863)
+    self.assertEqual( logits.argmax(-1).tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), SECOND_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
   # forward + backward testing with strings
@@ -78,7 +89,7 @@ class TestTransformer(unittest.TestCase):
     x = "hey"
     logits, loss = model(x)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
+    self.assertEqual(p, STRING_PREDICTION)
     self.assertEqual(loss, None)
 
   def test_forward_with_loss_str(self):
@@ -92,8 +103,8 @@ class TestTransformer(unittest.TestCase):
     
     p = [tokens(x) for x in logits.argmax(-1)]
     
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.6525)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_STRING)
     self.assertTrue(out)
 
   def test_backward_str(self):
@@ -108,8 +119,8 @@ class TestTransformer(unittest.TestCase):
 
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.6525)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_STRING)
     self.assertTrue(out)
 
     # backprop
@@ -120,8 +131,8 @@ class TestTransformer(unittest.TestCase):
     # second pass
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.5600)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), SECOND_PASS_LOSS_STRING)
     self.assertTrue(out)
 
 
@@ -147,10 +158,7 @@ class TestTransformer(unittest.TestCase):
     model = FullTransformer(config).cuda()
     x = torch.randint(0, config.vocab_size, size = (2, 6)).cuda()
     logits, loss = model(x)
-    self.assertEqual(
-      logits.argmax(-1).detach().cpu().tolist(),
-      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
-    )
+    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), FIRST_PASS_TARGET_TENSOR )
     self.assertEqual(loss, None)
 
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
@@ -164,11 +172,8 @@ class TestTransformer(unittest.TestCase):
     target = (target, [[torch.randn(6, 6).cuda()]])
 
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).detach().cpu().tolist(),
-      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
-    )
-    out = np.isclose(loss.item(), 5.8412)
+    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
@@ -184,11 +189,8 @@ class TestTransformer(unittest.TestCase):
     target = (target, [[torch.randn(6, 6).cuda()]])
 
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).detach().cpu().tolist(),
-      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
-    )
-    out = np.isclose(loss.item(), 5.8412)
+    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
     optim.zero_grad()
@@ -196,11 +198,8 @@ class TestTransformer(unittest.TestCase):
     optim.step()
 
     logits, loss = model(x, target)
-    self.assertEqual(
-      logits.argmax(-1).detach().cpu().tolist(),
-      [[50, 15, 117, 52, 89, 95], [32, 13, 89, 9, 9, 7]]
-    )
-    out = np.isclose(loss.item(), 5.7863)
+    self.assertEqual( logits.argmax(-1).detach().cpu().tolist(), FIRST_PASS_TARGET_TENSOR )
+    out = np.isclose(loss.item(), SECOND_PASS_LOSS_TENSOR)
     self.assertTrue(out)
 
   # forward + backward testing with strings CUDA
@@ -212,7 +211,7 @@ class TestTransformer(unittest.TestCase):
     x = "hey"
     logits, loss = model(x)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
+    self.assertEqual(p, STRING_PREDICTION)
     self.assertEqual(loss, None)
 
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
@@ -225,8 +224,8 @@ class TestTransformer(unittest.TestCase):
 
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.6525)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_STRING)
     self.assertTrue(out)
 
   @unittest.skipUnless(torch.cuda.is_available(), "CUDA not found, skipping these tests")
@@ -242,8 +241,8 @@ class TestTransformer(unittest.TestCase):
 
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.6525)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), FIRST_PASS_LOSS_STRING)
     self.assertTrue(out)
 
     # backprop
@@ -254,8 +253,8 @@ class TestTransformer(unittest.TestCase):
     # second pass
     logits, loss = model(x, target)
     p = [tokens(x) for x in logits.argmax(-1)]
-    self.assertEqual(p, ['fmo'])
-    out = np.isclose(loss.item(), 4.5600)
+    self.assertEqual(p, STRING_PREDICTION)
+    out = np.isclose(loss.item(), SECOND_PASS_LOSS_STRING)
     self.assertTrue(out)
 
 if __name__ == "__main__":
