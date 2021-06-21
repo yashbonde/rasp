@@ -3,7 +3,7 @@
 # modified for yashbonde/rasp
 
 import math
-
+import json
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -11,26 +11,32 @@ import einops as ein
 
 from rasp.manual import vocab, tokens
 
+# ------ configurations ------ #
+
 class Config:
-  vocab_size = len(vocab)
-  n_embd = 18
-  block_size = 32
-  dropout = 0.0
-  n_layer = 1
-  n_head = 1
   def __init__(self, **kwargs):
+    self.vocab_size = len(vocab)
+    self.n_embd = 18
+    self.block_size = 32
+    self.dropout = 0.0
+    self.n_layer = 1
+    self.n_head = 1
     for k,v in kwargs.items():
       setattr(self, k, v)
 
+  def get_json(self):
+    return json.dumps(vars(self))
 
-class TinyConfig:
-  vocab_size = len(vocab)
-  n_embd = 18
-  block_size = 32
-  dropout = 0.0
-  n_layer = 1
-  n_head = 1
-  
+# ------ response ------ #
+
+class Response:
+  def __init__(self, logits, loss, attns):
+    self.logits = logits
+    self.loss = loss
+    self.attns = attns
+    self.tokens = tokens(logits.argmax(-1))
+
+# ------ model ------ #
 
 class SelfAttention(nn.Module):
   def __init__(self, config):
@@ -66,6 +72,7 @@ class SelfAttention(nn.Module):
     y = self.proj(y)
     return y, att
 
+
 class Block(nn.Module):
   """ an unassuming Transformer block """
 
@@ -92,6 +99,7 @@ class Block(nn.Module):
     x = x + self.mlp(self.ln2(x))
     return [x, att]
 
+
 class FullTransformer(nn.Module):
   """A full transformer model with focus on data and I/O.
   Can consume strings, lists, arrays and torch-tensors."""
@@ -111,6 +119,8 @@ class FullTransformer(nn.Module):
     self.ln_f = nn.LayerNorm(config.n_embd)
     self.head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
     self.block_size = config.block_size
+
+    self.config = config
 
   @property
   def num_parameters(self):
@@ -139,7 +149,7 @@ class FullTransformer(nn.Module):
     #  [       0.,        0., -1000000., -1000000., -1000000.],
     #  [       0.,        0., -1000000., -1000000., -1000000.]]
     #
-    # this is not the fastest method out there, but get's the job done.
+    # this is not the fastest method out there, but hey gets the job done.
     m = torch.zeros((len(idx), idx.shape[1], idx.shape[1]))
     for _i,t in enumerate(idx):
       if P_id in t[1:]:
@@ -160,12 +170,16 @@ class FullTransformer(nn.Module):
         targets = targets.unsqueeze(0)
 
       # verify the shapes of attention masks
-      assert len(attn_masks) == len(self.blocks), "Number of attentions should be same as number of blocks"
-      assert isinstance(attn_masks[0], (list, tuple, torch.Tensor)), "Each sequence in the attention should be a tuple/list/tensor"
+      assert len(attn_masks) == len(self.blocks), \
+        "Number of attentions should be same as number of blocks. " +\
+        f"{len(attn_masks)} != {len(self.blocks)}"
+      assert isinstance(attn_masks[0], (list, tuple, torch.Tensor)), \
+        "Each sequence in the attention should be a tuple/list/tensor"
 
       for i,(b,a) in enumerate(zip(self.blocks, attn_masks)):
         assert isinstance(a[0], torch.Tensor)
-        assert len(a) == b.n_head, f"Number of attn != number of heads in a block. Got: {len(a), b.n_head}"
+        assert len(a) == b.n_head, \
+          f"Number of attn != number of heads in a block. Got: {len(a), b.n_head}"
         attn_masks[i] = torch.cat([aa.float().unsqueeze(0) for aa in a], 0)
 
       # for i,a in enumerate(attn_masks):
@@ -176,7 +190,7 @@ class FullTransformer(nn.Module):
 
     return idx, m, targets
 
-  def forward(self, idx, targets=None, output_format = None):
+  def forward(self, idx, targets=None, output_dict = False):
     """
     Args:
       idx: Can take in following objects:
@@ -184,10 +198,10 @@ class FullTransformer(nn.Module):
         - list[string]
         - torch.LongTensor (1D)
         - torch.LongTensor (2D)
-      targets ([type], optional): Since in rasp you calculate losses for attention matrix as well,
-        this targets is a list:
-          - torch.LongTensor(): with the cross entropy for entire input tokens, just like a
-            normal transformer (GPT/BERT)
+      targets (optional): Since in rasp you calculate losses for attention matrix
+        as well, this targets is a list:
+          - torch.LongTensor(): with the cross entropy for entire input tokens,
+            just like a normal transformer (GPT/BERT)
           - target_attn_masks:  this is the target matrices for all the attentions in the network.
             ensure that the number of heads and values are common.
 
@@ -227,13 +241,12 @@ class FullTransformer(nn.Module):
         mse_loss += F.mse_loss(a, t)
       loss = ce_loss + mse_loss
 
-    if output_format is not None:
-      raise NotImplementedError('this functionality has not been build, hold on!')
+    if not output_dict:
+      return logits, loss
+    return Response(logits, loss, all_attn)
 
-    return logits, loss
-
+# ------ model function ------ #
 
 def get_model(**kwargs):
   config = Config(**kwargs)
   return FullTransformer(config)
-

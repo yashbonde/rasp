@@ -7,24 +7,34 @@
 # >>> reverse("hey")
 # ... "yeh"
 
+import json
+import numpy as np
+from tqdm import trange
+
 from rasp.model import *
 from rasp.manual import ivocab, vocab, tokens
+from rasp.daily import Hashlib
 
-class Trainer:
-  # base object to train primitives
-  def __init__(self):
-    pass
+def set_seed(seed):
+  if seed is not None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 class Primitive:
   # primtive class is a Transformer neural network whose objective
   # is to perform that particular task.
-  def __init__(self, code = None, **kwargs):
+  def __init__(self, name, code = None, seed = 4, **model_kwargs):
+    set_seed(4)
     if code is not None:
       raise NotImplementedError("code parsing is still not implemented, hold your horses!")
 
-    config = Config(**kwargs)
-    self.model = FullTransformer(config)
+    self.model = get_model(**model_kwargs)
+    self.name = name
+
+    str_ = f"{name}-" + json.dumps(self.model.config.get_json())
+    self._hash = Hashlib.sha256(str_)
 
   def get_parameters(self):
     return self.model.parameters()
@@ -32,56 +42,36 @@ class Primitive:
   def __call__(self, *args, **kwargs):
     return self.model(*args, **kwargs)
 
+  def viz(self, x):
+    # this is not the best visualisation of attention since the values are
+    # in float. But this is good enough to see what's up
+    print("-+-" + "-" * len(x) * 2)
+    print(" | " + " ".join(x))
+    print("-+-" + "-" * len(x) * 2)
+    r = self(x, output_dict = True)
+    a = r.attns[0] * 10
+    a = a.long()
+    a = a.tolist()[0]
+    for i in range(len(a)):
+      print(f"{x[i]}|", " ".join([str(b) for b in a[i]]))
+    print("-+-" + "-" * len(x) * 2)
 
+  def train(self, ds, man_fn, optim_name = "Adam", n_epochs = 5, pbar = False, **optimiser_params):
+    """training any primitive has first class support since this is what each primitive is"""
+    optim = getattr(torch.optim, optim_name)(self.get_parameters(), **optimiser_params)
+    for i in range(n_epochs):
+      bar = trange(len(ds)) if pbar else range(len(ds))
+      for x, j in zip(ds, bar):
+        t = man_fn(x)
+        out, loss = self(idx = x, targets = t)
+        
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+
+        if j % 50 == 0:
+          print(loss)
+    self.viz(ds[0])
 
 def get_vocab():
   return vocab, ivocab
-
-if __name__ == "__main__":
-  import os, sys
-  import random
-  import torch
-
-  import numpy as np
-  from rasp.daily import folder
-  sys.path.append(os.path.join(folder(folder(__file__)), "primitives"))
-  from primitives import functional as F
-
-  # check if the loading is working
-  # print(F.identity("foo"))
-  vocab, ivocab = get_vocab()
-
-  def identity_dataset(n = 200, m = 32):
-    # since our manual primitives take care of the input output
-    # we can batch the dataset into buckets of similar lengths
-    ds = []
-    for _ in range(n): # generate samples
-      x = "".join([
-        ivocab[_i] for _i in np.random.randint(0, len(vocab) - 1, size = (np.random.randint(m) + 1,))
-      ])
-      ds.append(x)
-
-    m = max([len(x) for x in ds])
-    for i,s in enumerate(ds):
-      s = s[:m]
-      if np.random.random() > 0.6:
-        _i = np.random.randint(len(s))
-        _j = _i + np.random.randint(5)
-        _v = ivocab[np.random.randint(25)]
-        s = s[_i] + "".join([_v for _ in range(_i, _j, 1)]) + s[_j:]
-      s = s  + "".join(["$" for _ in range(m - len(s))])
-      ds[i] = s[:m]
-    return ds
-
-  ds = identity_dataset()
-  p = Primitive()
-  print("Test 1D:", tokens(p(ds[0])[0].argmax(-1)))
-  print("Test (batch):", tokens(p(ds[:2])[0].argmax(-1)))
-
-  # optim = torch.optim.Adam(p.get_parameters())
-
-  # from tqdm import trange
-  # pbar = trange(1000)
-
-
-
