@@ -21,6 +21,9 @@ import numpy as np
 import torch
 import einops as ein
 
+# NOTE: This is a demo code and not meant to be a production thing
+# changing the vocab will break some tests, so for the sake of your
+# and my sanity don't change this.
 vocab = {k:i for i,k in enumerate(string.ascii_lowercase + "$")}
 ivocab = {i:k for k,i in vocab.items()}
 
@@ -40,7 +43,7 @@ def tokens(x, bos = False):
     # Case A (str only): "hello"
     # Case B (list of str): ["hello", "hello"]
     # Case C (tensor 1D): [ 7,  4, 11, 11, 14]
-    # Case D (tensor 2D): [ 7,  4, 11, 11, 14]
+    # Case D (tensor 2D): [[ 7,  4, 11, 11, 14], [ 7,  4, 11, 11, 14]]
 
   can consume strings, lists, arrays and tensors
   """
@@ -58,6 +61,7 @@ def tokens(x, bos = False):
       x[i] = x[i] + "".join(["$" for _ in range(m - len(x[i]))])
     return torch.cat([tokens(s, bos).unsqueeze(0) for s in x]).long()
   else:
+    assert isinstance(x, (torch.Tensor, np.ndarray)), "Can consume only strings and torch.Tensors / np.ndarrays"
     # input is likely a tensor
     if len(x.shape) == 1:
       # Case C (tensor 1D): [ 7,  4, 11, 11, 14]
@@ -131,7 +135,7 @@ def select(m1: torch.Tensor, m2, op):
   assert len(m2.shape) == 1
   
   rows = ein.repeat(m1, "w -> n w", n = m2.shape[0])
-  cols = ein.repeat(m2, "h -> n h", n = m1.shape[0]).T
+  cols = ein.repeat(m2, "h -> h n", n = m1.shape[0])
 
   init_shape = rows.shape
   out = {

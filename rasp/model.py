@@ -7,9 +7,9 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import einops as ein
 
 from rasp.manual import vocab, tokens
-
 
 class Config:
   vocab_size = len(vocab)
@@ -121,20 +121,31 @@ class FullTransformer(nn.Module):
   
   def format_inputs_and_tokens(self, idx, targets):
     d = self.get_device()
+    P_token = "$"; P_id = vocab[P_token];
 
-    # format input
-    key_val_attn_mask = None
-
-    # if isinstance(idx, str):
-    #   idx = tokens(idx).to(d).unsqueeze(0)
-    # elif isinstance(idx, list) and isinstance(idx[0], str):
-    #   idx = torch.cat([tokens(x).unsqueeze(0) for x in idx], dim = 0).to(d)
-    # elif isinstance(idx, torch.Tensor) and len(idx.shape) == 1:
-    #   idx = idx.unsqueeze(0)
+    # format input and convert to tokens
     if not isinstance(idx, torch.Tensor):
       idx = tokens(idx)
     if len(idx.shape) == 1:
       idx = idx.unsqueeze(0)
+    
+    # create attention masks as follows:
+    #
+    # input --> "wd"
+    #
+    # [[       0.,        0.,        0.,        0.,        0.],
+    #  [       0.,        0.,        0.,        0.,        0.],
+    #  [       0.,        0., -1000000., -1000000., -1000000.],
+    #  [       0.,        0., -1000000., -1000000., -1000000.],
+    #  [       0.,        0., -1000000., -1000000., -1000000.]]
+    #
+    # this is not the fastest method out there, but get's the job done.
+    m = torch.zeros((len(idx), idx.shape[1], idx.shape[1]))
+    for _i,t in enumerate(idx):
+      if P_id in t[1:]:
+        l_ = (t[1:] == P_id).long().argmax(-1)
+        l_ = min(l_ + 1, t.shape[0])
+        m[_i, l_:, l_:] = -1e6
 
     if targets is not None:
       assert isinstance(targets, (list, tuple)), \
@@ -142,16 +153,13 @@ class FullTransformer(nn.Module):
 
       targets, attn_masks = targets
 
-      # targets for cross-entropy
-      if isinstance(targets, str):
-        targets = tokens(targets).to(d).view(1, -1)
-      elif isinstance(targets, list) and isinstance(targets[0], str):
-        targets = torch.cat([tokens(x) for x in targets], dim = 0).to(d)
-      elif isinstance(targets, torch.Tensor) and len(targets.shape) == 1:
-        targets = targets.view(1, -1)
-      targets = targets.long()
+      # convert the target to proper tokens
+      if not isinstance(targets, torch.Tensor):
+        targets = tokens(targets)
+      if len(targets.shape) == 1:
+        targets = targets.unsqueeze(0)
 
-      # attention masks
+      # verify the shapes of attention masks
       assert len(attn_masks) == len(self.blocks), "Number of attentions should be same as number of blocks"
       assert isinstance(attn_masks[0], (list, tuple, torch.Tensor)), "Each sequence in the attention should be a tuple/list/tensor"
 
@@ -166,12 +174,16 @@ class FullTransformer(nn.Module):
       # convert to the final tuple
       targets = (targets, attn_masks)
 
-    return idx, key_val_attn_mask, targets
+    return idx, m, targets
 
   def forward(self, idx, targets=None, output_format = None):
     """
     Args:
-      idx ([type]): [description]
+      idx: Can take in following objects:
+        - string
+        - list[string]
+        - torch.LongTensor (1D)
+        - torch.LongTensor (2D)
       targets ([type], optional): Since in rasp you calculate losses for attention matrix as well,
         this targets is a list:
           - torch.LongTensor(): with the cross entropy for entire input tokens, just like a
@@ -189,7 +201,7 @@ class FullTransformer(nn.Module):
 
     # forward the GPT model
     token_embeddings = self.tok_emb(idx) # each index maps to a (learnable) vector
-    position_embeddings = self.pos_emb[:, :t, :] # each position maps to a (learnable) vector
+    position_embeddings = self.pos_emb[:, :t] # each position maps to a (learnable) vector
     x = self.drop(token_embeddings + position_embeddings)
     all_attn = []
     for b in self.blocks:
@@ -209,8 +221,8 @@ class FullTransformer(nn.Module):
       # MSE-loss, for each head, manually
       mse_loss = 0
       for a,t in zip(all_attn, attn_masks):
-        t = torch.tile(t, [a.shape[0], 1, 1, 1])
-        # print(a.shape, t.shape) # [b, n_head, s, s]
+        t = torch.tile(t, [a.shape[0], 1, 1]) # proper batch-ise
+        # print(a.shape, t.shape) # [b, s, s]
 
         mse_loss += F.mse_loss(a, t)
       loss = ce_loss + mse_loss

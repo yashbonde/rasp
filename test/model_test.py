@@ -16,8 +16,8 @@ class TestTransformer(unittest.TestCase):
     self.assertEqual(tokens(out.argmax(-1)), ['etffn'])
     out, loss = model(["hello", "world"])
     self.assertEqual(tokens(out.argmax(-1)), ['etffn', 'zkofk'])
-    out, loss = model(["hello", "world", "sdf"])
-    self.assertEqual(tokens(out.argmax(-1)), ['etffn', 'zkofk', 'jjkxx'])
+    out, loss = model(["hello", "wd", "sdfg"])
+    self.assertEqual(tokens(out.argmax(-1)), ['etffn', 'zkxxx', 'jkkdx'])
     
 
 if __name__ == '__main__':
