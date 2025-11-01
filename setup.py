@@ -1,17 +1,22 @@
 #!/usr/bin/python
 
 import os
-from rasp.daily import folder
-
-from distutils.core import setup
+from setuptools import setup
 
 setup(
   name='rasp',
-  version='n',
+  version='0.1.0',
   description='Restricted Access Sequence Processing (RASP) Language',
-  long_description=open(os.path.join(folder(__file__), "README.md")).read(),
+  long_description=open("README.md").read(),
   author='Yash Bonde',
   author_email='bonde.yash97@gmail.com',
   url='https://github.com/yashbonde/rasp',
   packages=['rasp'],
+  install_requires=[
+    'numpy',
+    'tqdm',
+    'torch',
+    'einops',
+    'requests'
+  ],
 )
